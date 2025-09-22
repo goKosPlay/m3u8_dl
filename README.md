@@ -1,4 +1,4 @@
-![Logo](images/logo.jpeg)
+<img src="images/logo.png" alt="Logo" width="360" height="360">
 
 ### 下载 m3u8 方便工具
 * 编译方式  go build -o m3u8-dl main.go  
