@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GoORMHelperCache">
+    <option name="schemaMapping">
+      <map>
+        <entry key="m3u8Info">
+          <value>
+            <set>
+              <option value="file://$PROJECT_DIR$/main.go" />
+            </set>
+          </value>
+        </entry>
+        <entry key="segment">
+          <value>
+            <set>
+              <option value="file://$PROJECT_DIR$/main.go" />
+            </set>
+          </value>
+        </entry>
+        <entry key="simpleBar">
+          <value>
+            <set>
+              <option value="file://$PROJECT_DIR$/main.go" />
+            </set>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="scannedPathMapping">
+      <map>
+        <entry key="file://$PROJECT_DIR$/main.go">
+          <value>
+            <ScannedPath>
+              <option name="lastModified" value="1758549280868" />
+              <option name="schema">
+                <list>
+                  <option value="simpleBar" />
+                  <option value="m3u8Info" />
+                  <option value="segment" />
+                </list>
+              </option>
+            </ScannedPath>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="tableStructMapping">
+      <map>
+        <entry key="m3u8_info" value="m3u8Info" />
+        <entry key="segment" value="segment" />
+        <entry key="simple_bar" value="simpleBar" />
+      </map>
+    </option>
+    <option name="lastTimeChecked" value="1758545889512" />
+  </component>
+</project>
