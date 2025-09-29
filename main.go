@@ -147,6 +147,16 @@ func fetchM3U8(rawURL string) (*m3u8Info, error) {
 		// TS 行：包含 jpg/jpeg 命名但实际为 TS 的切片
 		segURL, _ := url.Parse(line)
 		fullURL := baseURL.ResolveReference(segURL).String()
+
+		// 检查 URL 是否以 .jpg 或 .jpeg 结尾但实际是 TS 流
+		u, _ := url.Parse(fullURL)
+		path := strings.ToLower(u.Path)
+		if strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg") {
+			// 修改 URL 的路径以 .ts 结尾
+			u.Path = strings.TrimSuffix(u.Path, filepath.Ext(u.Path)) + ".ts"
+			fullURL = u.String()
+		}
+
 		info.segments = append(info.segments, segment{
 			url:   fullURL,
 			key:   key,
