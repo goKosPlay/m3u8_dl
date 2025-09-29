@@ -1,4 +1,6 @@
 <img src="images/logo.png" alt="Logo" width="360" height="360">
+<img src="images/img_0.png" alt="命令">
+<img src="images/img_1.png" alt="中断">
 
 ### 添加 ffmpeg
 * Mac: brew install ffmpeg
