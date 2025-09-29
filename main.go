@@ -12,16 +12,19 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -311,12 +314,13 @@ func downloadSeg(ctx context.Context, seg segment, dst string, bar *simpleBar, c
 
 		var data bytes.Buffer
 		_, err = io.CopyBuffer(&data, resp.Body, buf)
-		resp.Body.Close()
 		if err != nil {
+			resp.Body.Close()
 			lastErr = fmt.Errorf("读取 %s 响应失败 (尝试 %d/%d): %v", seg.url, attempt, maxRetries, err)
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 			continue
 		}
+		resp.Body.Close()
 
 		cipherData = data.Bytes()
 		if len(cipherData) == 0 {
@@ -361,7 +365,11 @@ func downloadSeg(ctx context.Context, seg segment, dst string, bar *simpleBar, c
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 			continue
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			lastErr = fmt.Errorf("关闭 %s 失败 (尝试 %d/%d): %v", tempDst, attempt, maxRetries, err)
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			continue
+		}
 
 		if _, err := os.Stat(tempDst); err == nil {
 			cleanDst := strings.Split(dst, "?")[0]
@@ -384,7 +392,6 @@ func mergeToMP4(tsDir, outMP4 string) error {
 		return fmt.Errorf("创建输出目录失败: %v", err)
 	}
 
-	// 使用更明确的临时文件名
 	tempMP4 := strings.TrimSuffix(outMP4, ".mp4") + "_temp.mp4"
 	listFile := filepath.Join(tsDir, "ts.list")
 	absListFile, err := filepath.Abs(listFile)
@@ -397,7 +404,10 @@ func mergeToMP4(tsDir, outMP4 string) error {
 	if err != nil {
 		return fmt.Errorf("创建文件列表失败: %v", err)
 	}
-	defer os.Remove(listFile)
+	defer func() {
+		f.Close()
+		os.Remove(listFile)
+	}()
 
 	tsFiles := getTSFiles(tsDir)
 	if len(tsFiles) == 0 {
@@ -417,7 +427,9 @@ func mergeToMP4(tsDir, outMP4 string) error {
 			return fmt.Errorf("写入文件列表失败: %v", err)
 		}
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("关闭文件列表失败: %v", err)
+	}
 
 	listContent, err := os.ReadFile(listFile)
 	if err != nil {
@@ -448,7 +460,7 @@ func mergeToMP4(tsDir, outMP4 string) error {
 		"-bsf:a", "aac_adtstoasc",
 		"-movflags", "+faststart",
 		"-fflags", "+igndts",
-		"-f", "mp4", // 明确指定输出格式
+		"-f", "mp4",
 		"-y",
 		absTempMP4,
 	)
@@ -530,6 +542,7 @@ func main() {
 	m3u8URL := os.Args[len(os.Args)-2]
 	outMP4 := os.Args[len(os.Args)-1]
 
+	// 创建共享的 HTTP 客户端
 	client := &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConns:        maxConcurrent,
@@ -542,6 +555,7 @@ func main() {
 	// 设置速率限制：每秒最多 10 个请求
 	limiter := rate.NewLimiter(rate.Every(100*time.Millisecond), 10)
 
+	// 1. 递归拉 m3u8
 	info, err := fetchM3U8(m3u8URL, client)
 	if err != nil {
 		log.Fatalf("拉取 m3u8 失败: %v", err)
@@ -549,17 +563,54 @@ func main() {
 	total = int64(len(info.segments))
 	fmt.Printf("共 %d 片 ts\n", total)
 
-	workDir := strings.TrimSuffix(outMP4, filepath.Ext(outMP4))
+	// 2. 建目录，添加随机后缀
+	rand.Seed(time.Now().UnixNano())
+	workDir := fmt.Sprintf("%s_%d", strings.TrimSuffix(outMP4, filepath.Ext(outMP4)), rand.Intn(1000000))
+	log.Printf("创建临时目录: %s\n", workDir)
 	os.RemoveAll(workDir)
-	os.MkdirAll(workDir, 0755)
-	defer os.RemoveAll(workDir)
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		log.Fatalf("创建临时目录失败: %v", err)
+	}
 
+	// 设置信号处理
+	ctx, cancel := context.WithCancel(context.Background())
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		log.Println("收到中断信号，取消下载并清理临时目录")
+		cancel()                    // 取消所有下载
+		time.Sleep(1 * time.Second) // 等待 goroutine 结束
+		if err := removeDirWithRetry(workDir, 3, 500*time.Millisecond); err != nil {
+			log.Printf("清理临时目录失败: %v", err)
+			// 列出剩余文件以便调试
+			if files, err := os.ReadDir(workDir); err == nil {
+				log.Printf("临时目录 %s 中剩余文件: %v", workDir, files)
+			}
+		} else {
+			log.Printf("成功清理临时目录: %s", workDir)
+		}
+		os.Exit(1)
+	}()
+
+	// 确保正常退出时清理
+	defer func() {
+		if err := removeDirWithRetry(workDir, 3, 500*time.Millisecond); err != nil {
+			log.Printf("清理临时目录失败: %v", err)
+			// 列出剩余文件以便调试
+			if files, err := os.ReadDir(workDir); err == nil {
+				log.Printf("临时目录 %s 中剩余文件: %v", workDir, files)
+			}
+		} else {
+			log.Printf("成功清理临时目录: %s", workDir)
+		}
+	}()
+
+	// 3. 进度条
 	bar := newBar(total)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// 4. 并发下载
 	errCh := make(chan error, total)
-
 	if maxConcurrent < 2 {
 		maxConcurrent = 2 // 最低并发数
 	}
@@ -585,7 +636,7 @@ func main() {
 				cancel()
 			}
 		}(seg)
-		time.Sleep(200 * time.Millisecond) // 增加延迟
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	wg.Wait()
@@ -595,6 +646,7 @@ func main() {
 	default:
 	}
 
+	// 5. 合并
 	if err := mergeToMP4(workDir, outMP4); err != nil {
 		log.Fatalf("合并失败: %v", err)
 	}
@@ -641,4 +693,22 @@ func validateTSFiles(tsDir string) error {
 		}
 	}
 	return nil
+}
+
+// removeDirWithRetry 尝试多次删除目录，处理临时锁定的文件
+func removeDirWithRetry(dir string, retries int, delay time.Duration) error {
+	var lastErr error
+	for i := 0; i < retries; i++ {
+		err := os.RemoveAll(dir)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		// 列出剩余文件以便调试
+		if files, err := os.ReadDir(dir); err == nil {
+			log.Printf("尝试 %d/%d 删除目录 %s 失败，剩余文件: %v", i+1, retries, dir, files)
+		}
+		time.Sleep(delay)
+	}
+	return fmt.Errorf("删除目录 %s 失败: %v", dir, lastErr)
 }
