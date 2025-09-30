@@ -106,11 +106,19 @@ func fetchM3U8(rawURL string, client *http.Client) (*m3u8Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Error closing response body in fetchM3U8: %v", closeErr)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status=%d", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		isMaster bool
@@ -232,7 +240,11 @@ func fetchKey(keyURL string, client *http.Client) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Error closing response body in fetchKey: %v", closeErr)
+		}
+	}()
 	return io.ReadAll(resp.Body)
 }
 
@@ -315,12 +327,20 @@ func downloadSeg(ctx context.Context, seg segment, dst string, bar *simpleBar, c
 		var data bytes.Buffer
 		_, err = io.CopyBuffer(&data, resp.Body, buf)
 		if err != nil {
-			resp.Body.Close()
+			defer func() {
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					log.Printf("Error closing response body after read error for %s: %v", seg.url, closeErr)
+				}
+			}()
 			lastErr = fmt.Errorf("读取 %s 响应失败 (尝试 %d/%d): %v", seg.url, attempt, maxRetries, err)
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 			continue
 		}
-		resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("Error closing response body in downloadSeg: %v", closeErr)
+			}
+		}()
 
 		cipherData = data.Bytes()
 		if len(cipherData) == 0 {
