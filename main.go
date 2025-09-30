@@ -276,7 +276,7 @@ func makeIV(seq uint64) []byte {
 
 /* ---------- 5. 下载 + 解密（或原样） ---------- */
 var bufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return make([]byte, 32*1024) // 32KB 缓冲区
 	},
 }
@@ -618,24 +618,22 @@ func main() {
 
 	var wg sync.WaitGroup
 	for _, seg := range info.segments {
-		wg.Add(1)
 		sem <- struct{}{}
-		go func(s segment) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 
-			baseName := filepath.Base(s.url)
+			baseName := filepath.Base(seg.url)
 			if ext := strings.ToLower(filepath.Ext(baseName)); ext == ".jpg" || ext == ".jpeg" {
 				baseName = strings.TrimSuffix(baseName, ext) + ".ts"
 			}
 			baseName = strings.Split(baseName, "?")[0]
-			dst := filepath.Join(workDir, fmt.Sprintf("%05d_%s", s.index, baseName))
+			dst := filepath.Join(workDir, fmt.Sprintf("%05d_%s", seg.index, baseName))
 
-			if err := downloadSeg(ctx, s, dst, bar, client, limiter); err != nil {
+			if err := downloadSeg(ctx, seg, dst, bar, client, limiter); err != nil {
 				errCh <- err
 				cancel()
 			}
-		}(seg)
+		})
 		time.Sleep(200 * time.Millisecond)
 	}
 
