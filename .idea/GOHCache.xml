@@ -31,7 +31,7 @@
         <entry key="file://$PROJECT_DIR$/main.go">
           <value>
             <ScannedPath>
-              <option name="lastModified" value="1759214823169" />
+              <option name="lastModified" value="1759214827771" />
               <option name="schema">
                 <list>
                   <option value="simpleBar" />
@@ -51,6 +51,6 @@
         <entry key="simple_bar" value="simpleBar" />
       </map>
     </option>
-    <option name="lastTimeChecked" value="1759115847747" />
+    <option name="lastTimeChecked" value="1760120588436" />
   </component>
 </project>

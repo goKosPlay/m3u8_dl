@@ -35,6 +35,13 @@ var (
 	total int64
 )
 
+/* ---------- 全局请求头（通过命令行设置） ---------- */
+var (
+	gReferer   string
+	gUserAgent string
+	gCookie    string
+)
+
 /* ---------- 固定宽度进度条（总宽 60） ---------- */
 type simpleBar struct {
 	total   int64
@@ -101,6 +108,16 @@ func fetchM3U8(rawURL string, client *http.Client) (*m3u8Info, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return nil, err
+	}
+	// 设置请求头避免 403
+	if gReferer != "" {
+		req.Header.Set("Referer", gReferer)
+	}
+	if gUserAgent != "" {
+		req.Header.Set("User-Agent", gUserAgent)
+	}
+	if gCookie != "" {
+		req.Header.Set("Cookie", gCookie)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -236,6 +253,16 @@ func fetchKey(keyURL string, client *http.Client) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 设置请求头避免 403
+	if gReferer != "" {
+		req.Header.Set("Referer", gReferer)
+	}
+	if gUserAgent != "" {
+		req.Header.Set("User-Agent", gUserAgent)
+	}
+	if gCookie != "" {
+		req.Header.Set("Cookie", gCookie)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -311,7 +338,18 @@ func downloadSeg(ctx context.Context, seg segment, dst string, bar *simpleBar, c
 			continue
 		}
 
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+		// 设置请求头避免 403
+		ua := gUserAgent
+		if ua == "" {
+			ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0 Safari/537.36"
+		}
+		req.Header.Set("User-Agent", ua)
+		if gReferer != "" {
+			req.Header.Set("Referer", gReferer)
+		}
+		if gCookie != "" {
+			req.Header.Set("Cookie", gCookie)
+		}
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -554,13 +592,17 @@ func probeDAR(tsFile string) string {
 func main() {
 	var maxConcurrent int
 	flag.IntVar(&maxConcurrent, "concurrency", runtime.NumCPU()/2, "最大并发下载数")
+	flag.StringVar(&gReferer, "referer", "", "HTTP Referer 请求头（例如播放页地址）")
+	flag.StringVar(&gUserAgent, "ua", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0 Safari/537.36", "User-Agent 请求头")
+	flag.StringVar(&gCookie, "cookie", "", "Cookie 请求头（如需会话认证）")
 	flag.Parse()
 
-	if len(os.Args) < 3 {
-		log.Fatalf("用法: %s [-concurrency N] <m3u8_url> <输出文件名.mp4>", os.Args[0])
+	args := flag.Args()
+	if len(args) < 2 {
+		log.Fatalf("用法: %s [-concurrency N] [-referer URL] [-ua UA] [-cookie COOKIE] <m3u8_url> <输出文件名.mp4>", os.Args[0])
 	}
-	m3u8URL := os.Args[len(os.Args)-2]
-	outMP4 := os.Args[len(os.Args)-1]
+	m3u8URL := args[0]
+	outMP4 := args[1]
 
 	// 创建共享的 HTTP 客户端
 	client := &http.Client{
